@@ -2,6 +2,7 @@ from datetime import datetime
 from io import StringIO
 import csv
 import json
+import math
 import sys
 
 if len(sys.argv) != 2:
@@ -52,15 +53,35 @@ for line in transactions_reader:
 	line["date"] = int(datetime.strptime(line["date"], "%m/%d/%Y").timestamp())
 	line["amnt"] = float(line["amnt"].replace(",", ""))
 
-	# Process accounts
+	# Generate account tree
 	curr = accounts
 	for acct in line["acct"].split("."):
 		if acct not in curr.keys():
-			curr[acct] = {"val": 0.0}
+			curr[acct] = {}
 			curr = curr[acct]
 		else:
 			curr = curr[acct]
-	curr["val"] += line["amnt"]
+	if "val" not in curr.keys():
+		curr["val"] = line["amnt"]
+	else:
+		curr["val"] += line["amnt"]
 
-	print(line)
 	transactions.append(line)
+
+
+def recurse_write(account, prefix, file):
+	"""Recursively write out an account tree to file, without history included"""
+	for acct_name in account.keys():
+		if acct_name == "val":
+			# Print out value of account in the form of "files"
+			base_str = "{timestamp}|User|A|{path}".format(timestamp=int(datetime.now().timestamp()), path=prefix)
+			for i in range(math.ceil(abs(account["val"]) / 100)):
+				file.write("{path}/{amnt}.{mtype}\n".format(path=base_str, amnt=(i + 1) * 100,
+															mtype="asset" if account["val"] > 0 else "debt"))
+		else:
+			recurse_write(account[acct_name], prefix + "/" + acct_name, file)
+
+
+# Primitive conversion into Gource viz; does not take history into acccount
+with open("output.log", "w") as log:
+	recurse_write(accounts, "", log)
