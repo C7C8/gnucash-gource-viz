@@ -1,7 +1,6 @@
 from datetime import datetime
 from io import StringIO
 import csv
-import json
 import math
 import sys
 
@@ -57,31 +56,48 @@ for line in transactions_reader:
 	curr = accounts
 	for acct in line["acct"].split("."):
 		if acct not in curr.keys():
-			curr[acct] = {}
+			curr[acct] = {"val": 0}
 			curr = curr[acct]
 		else:
 			curr = curr[acct]
-	if "val" not in curr.keys():
-		curr["val"] = line["amnt"]
-	else:
-		curr["val"] += line["amnt"]
 
 	transactions.append(line)
 
+transactions = sorted(transactions, key=lambda x: x["date"])
 
-def recurse_write(account, prefix, file):
-	"""Recursively write out an account tree to file, without history included"""
-	for acct_name in account.keys():
-		if acct_name == "val":
-			# Print out value of account in the form of "files"
-			base_str = "{timestamp}|User|A|{path}".format(timestamp=int(datetime.now().timestamp()), path=prefix)
-			for i in range(math.ceil(abs(account["val"]) / 100)):
-				file.write("{path}/{amnt}.{mtype}\n".format(path=base_str, amnt=(i + 1) * 100,
-															mtype="asset" if account["val"] > 0 else "debt"))
-		else:
-			recurse_write(account[acct_name], prefix + "/" + acct_name, file)
-
-
-# Primitive conversion into Gource viz; does not take history into acccount
+# Convert entire account history to Gource history
 with open("output.log", "w") as log:
-	recurse_write(accounts, "", log)
+	for transaction in transactions:
+		# Parse account path and navigate to the right account in the tree
+		path = transaction["acct"].replace(".", "/")
+		account = accounts
+		for acct in transaction["acct"].split("."):
+			account = account[acct]
+
+		# Commit the transaction, then figure out how many "files" we need to add or remove
+		old_filecount = math.ceil(abs(account["val"]) / 100)
+		old_amnt = account["val"]
+		account["val"] += transaction["amnt"]
+		new_filecount = math.ceil(abs(account["val"]) / 100)
+
+		base_str = "{timestamp}|User|{operation}|/{path}/{amnt}.{mtype}\n"
+		tmp = range(old_filecount, new_filecount, 1 if old_filecount < new_filecount else -1)
+
+		print("{path:<40}: {cnt1} ({amnt1:.2f}) -> {cnt2} ({amnt2:.2f}), ({rstart}, {rend})".format(
+			path=path,
+			cnt1=old_filecount,
+			amnt1=old_amnt,
+			cnt2=new_filecount,
+			amnt2=account["val"],
+			rstart=tmp.start,
+			rend=tmp.stop))
+
+		for i in tmp:
+			log.write(base_str.format(
+				timestamp=transaction["date"],
+				operation="A" if new_filecount > old_filecount else "D",
+				path=path,
+				amnt=(i+1)*100,
+				mtype="asset" if account["val"] > 0 else "debt"))
+
+
